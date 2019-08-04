@@ -10,6 +10,13 @@ const KEYS: any = {
   Program: ['templateNodes'],
   Element: ['children', 'outputs'],
   BoundEvent: ['handler'],
+  BoundText: ['value'],
+  ASTWithSource: ['ast'],
+  Interpolation: ['expressions'],
+  PrefixNot: ['expression'],
+  Binary: ['left', 'right'],
+  Template: ['templateAttrs'],
+  BoundAttribute: ['value'],
 };
 
 function fallbackKeysFilter(this: any, key: string) {
@@ -111,22 +118,60 @@ function preprocessNode(node: { [x: string]: any; type: any }) {
   }
 }
 
+function convertNodeSourceSpanToLoc(sourceSpan: {
+  start: { line: number; col: any };
+  end: { line: number; col: any };
+}) {
+  return {
+    start: {
+      line: sourceSpan.start.line + 1,
+      column: sourceSpan.start.col,
+    },
+    end: {
+      line: sourceSpan.end.line + 1,
+      column: sourceSpan.end.col,
+    },
+  };
+}
+
 function parseForESLint(code: string, options: { filePath: string }) {
+  const angularCompilerResult = parseTemplate(code, options.filePath, {
+    preserveWhitespaces: true,
+  });
+
+  let startSourceSpan: any;
+  angularCompilerResult.nodes.forEach(node => {
+    if (!startSourceSpan) {
+      startSourceSpan = node.sourceSpan;
+      return;
+    }
+    if (node.sourceSpan.start.offset < startSourceSpan.offset) {
+      startSourceSpan = node.sourceSpan;
+      return;
+    }
+  });
+
+  let endSourceSpan: any;
+  angularCompilerResult.nodes.forEach(node => {
+    if (!endSourceSpan) {
+      endSourceSpan = node.sourceSpan;
+      return;
+    }
+    if (node.sourceSpan.end.offset > endSourceSpan.offset) {
+      endSourceSpan = node.sourceSpan;
+      return;
+    }
+  });
+
   const ast = {
     type: 'Program',
     comments: [],
     tokens: [],
-    templateNodes: parseTemplate(code, options.filePath).nodes,
-    range: [0, 1],
+    templateNodes: angularCompilerResult.nodes,
+    range: [0, endSourceSpan.end.offset],
     loc: {
-      start: {
-        line: 0,
-        column: 0,
-      },
-      end: {
-        line: 0,
-        column: 1,
-      },
+      start: convertNodeSourceSpanToLoc(startSourceSpan).start,
+      end: convertNodeSourceSpanToLoc(endSourceSpan).end,
     },
     value: code,
   };
@@ -143,21 +188,7 @@ function parseForESLint(code: string, options: { filePath: string }) {
     scopeManager,
     visitorKeys: KEYS,
     services: {
-      convertNodeSourceSpanToLoc(sourceSpan: {
-        start: { line: number; col: any };
-        end: { line: number; col: any };
-      }) {
-        return {
-          start: {
-            line: sourceSpan.start.line + 1,
-            column: sourceSpan.start.col,
-          },
-          end: {
-            line: sourceSpan.end.line + 1,
-            column: sourceSpan.end.col,
-          },
-        };
-      },
+      convertNodeSourceSpanToLoc,
       defineTemplateBodyVisitor(
         templateBodyVisitor: { [x: string]: any },
         scriptVisitor: { [x: string]: any },
